@@ -277,7 +277,7 @@ export function DeployProgramme() {
           {prefill.amount && (
             <span className="deploy__proposal-row">
               <span>Plans to fund</span>
-              <span>{prefill.amount} USDC</span>
+              <span>{prefill.amount} XLM</span>
             </span>
           )}
           {prefill.purpose && (

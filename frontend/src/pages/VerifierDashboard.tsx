@@ -172,8 +172,7 @@ export const VerifierDashboard = () => {
           <div className="verifier-page__signin-copy">
             <h2 id="verifier-signin">Sign in with your verifier account</h2>
             <p className="typo-text text-muted">
-              Use the account the programme registered as its verifier. Passkey or Freighter both
-              work.
+              Use the account the programme registered as its verifier, in Freighter.
             </p>
             <Button onClick={signIn} loading={connecting} loadingLabel="Signing in…">
               Sign in
