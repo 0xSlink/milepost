@@ -46,7 +46,7 @@ export const FIXTURE_SCHEMAS: SchemaFixture[] = [
     fields: 'programme: address, tranche: u32, invoice_ref: string',
     revocable: true,
   },
-};
+];
 
 export type DeployMode = 'Direct' | 'Allocated' | 'Restricted' | 'Open';
 

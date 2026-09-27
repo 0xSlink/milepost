@@ -119,7 +119,7 @@ export function DeployProgramme() {
   const tranchesFinalError = tranchesError(tranchesInput);
 
   // Step 3 validation — the deadlines, shown and checked as a sequence.
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  const [nowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const deadlineFor = (label: string, value: number | null): string | null => {
     if (value === null) return `Set ${label}.`;
     if (value <= nowSeconds) return `${label} must be in the future.`;
