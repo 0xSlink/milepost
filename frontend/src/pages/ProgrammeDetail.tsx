@@ -21,7 +21,9 @@ import { useSoroban } from "../context/useSoroban";
 import { useContractRead, useContractResult, useIndexedList, useProgramme } from "../hooks";
 import { fetchProgrammes } from "../lib/indexer";
 import { formatAmount } from "../lib/amount";
+import { isSampleProgrammeId } from "../lib/programmeView";
 import { registryVerificationCopy } from "../lib/registryVerification";
+import { fetchTokenName, parseTokenName } from "../lib/token";
 import "./ProgrammeDetail.css";
 
 const ZERO = 0n;
@@ -77,6 +79,61 @@ const ASSET_LABEL = "XLM";
 const formatXlm = (amount: bigint) => formatAmount(amount, { asset: ASSET_LABEL });
 const formatAddress = (address: string) =>
   `${address.slice(0, 8)}...${address.slice(-8)}`;
+
+export function ProgrammeAssetRules({ tokenAddress }: { tokenAddress: string }) {
+  const { rpcUrl } = useSoroban();
+  const tokenRead = useContractRead(
+    () => fetchTokenName(tokenAddress, rpcUrl),
+    [tokenAddress, rpcUrl],
+    { enabled: Boolean(tokenAddress) },
+  );
+
+  const assetInfo = useMemo(() => {
+    if (!tokenRead.data) return null;
+    return parseTokenName(tokenRead.data);
+  }, [tokenRead.data]);
+
+  return (
+    <>
+      <div>
+        <dt>Asset</dt>
+        <dd>
+          {tokenRead.loading && <span className="text-muted">Reading asset…</span>}
+          {Boolean(tokenRead.error) && (
+            <span className="text-muted">
+              {formatAddress(tokenAddress)}
+            </span>
+          )}
+          {assetInfo && (
+            <div className="programme-asset-display">
+              <span className="programme-asset-code">{assetInfo.code}</span>
+              {assetInfo.issuer && (
+                <span className="programme-asset-issuer">
+                  <span className="programme-asset-issuer-label text-muted">Issuer:</span>
+                  <AddressChip
+                    address={assetInfo.issuer}
+                    showExplorerLink
+                    copyLabel="Copy issuer address"
+                  />
+                </span>
+              )}
+            </div>
+          )}
+        </dd>
+      </div>
+      <div>
+        <dt>Asset contract</dt>
+        <dd className="numeric" title={tokenAddress}>
+          <AddressChip
+            address={tokenAddress}
+            showExplorerLink
+            copyLabel="Copy asset contract address"
+          />
+        </dd>
+      </div>
+    </>
+  );
+}
 
 function deadlineToMs(deadline: bigint | number): number {
   return Number(deadline) * 1000;
@@ -684,7 +741,7 @@ export const ProgrammeDetail = () => {
               programmeId={programmeId}
               phase={phaseName}
               quorum={config.data?.quorum ?? 1}
-              isSample={isDefault}
+              isSample={isSampleProgrammeId(programmeId)}
               asset={ASSET_LABEL}
             />
           </div>
