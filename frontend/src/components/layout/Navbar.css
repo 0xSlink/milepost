@@ -340,7 +340,7 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
   cursor: pointer;
-  min-height: 28px;
+  min-height: var(--tap-min);
 }
 
 .account-menu__refresh-btn:hover {
@@ -378,7 +378,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
+  min-height: var(--tap-min);
   padding: var(--space-2) var(--space-3);
   background: var(--accent);
   color: var(--accent-contrast);
