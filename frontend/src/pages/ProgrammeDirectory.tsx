@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { MoneyRow } from '../components/programme/MoneyRow';
 import { ModePill } from '../components/ui';
@@ -7,6 +7,7 @@ import { Skeleton, Empty } from '../components/state/AsyncStates';
 import { describeAmount } from '../lib/amount';
 import { useIndexedList } from '../hooks';
 import { useWallet } from '../context/useWallet';
+import { useAnnouncer } from '../context/useAnnouncer';
 import { fetchMeta, fetchProgrammes, isStale } from '../lib/indexer';
 import { FIXTURE_USER_ROLES, ROLE_LABELS } from '../fixtures/userRoles';
 import {
@@ -129,6 +130,23 @@ export const ProgrammeDirectory = () => {
 
   const showEmpty = !loading && shown.length === 0;
 
+  // Issue #485: this list used to be a live region, so every filter change
+  // read every card aloud. Announce just the new count instead — once per
+  // filter, search or sort change. The ref starts at the initial key so the
+  // first load says nothing, and `loading` holds the announcement until the
+  // data lands rather than speaking a count that is about to change.
+  const announce = useAnnouncer();
+  const filterKey = `${query}|${phase}|${sort}|${yoursOnly ? 'yours' : ''}`;
+  const announcedKey = useRef(filterKey);
+
+  useEffect(() => {
+    if (loading || announcedKey.current === filterKey) return;
+    announcedKey.current = filterKey;
+    announce(
+      shown.length === 1 ? '1 programme matches' : `${shown.length} programmes match`,
+    );
+  }, [filterKey, loading, shown.length, announce]);
+
   return (
     <div className="directory-container">
       <section aria-labelledby="directory-heading" className="directory-section">
@@ -224,7 +242,9 @@ export const ProgrammeDirectory = () => {
           </div>
         )}
 
-        <div aria-live="polite" aria-busy={loading} className="directory-body">
+        {/* Not a live region: the count is announced through the shared
+            announcer, so replacing these cards reads nothing (#485). */}
+        <div aria-busy={loading} className="directory-body">
           {loading && (
             <div className="directory-grid">
               {[0, 1, 2].map((i) => (
