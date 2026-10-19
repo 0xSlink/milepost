@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ProgrammeConfig } from '@milepost/program';
 import { useSoroban } from '../context/useSoroban';
 import { useWallet } from '../context/useWallet';
+import { useAnnouncer } from '../context/useAnnouncer';
 import { useContractResult, useProgrammeParam, useTransaction } from '../hooks';
 import { AddressChip, Badge, Button, Card, Field, RadioGroup, TextArea } from '../components/ui';
 import { ProgrammeParamNotice } from '../components/programme/ProgrammeParamNotice';
-import { Empty, ErrorState, PendingState, TransactionOutcome } from '../components/state/AsyncStates';
+import { Empty, ErrorPanel, ErrorState, PendingState, TransactionOutcome } from '../components/state/AsyncStates';
 import { FIXTURE_PAYEES, type PayeeFixture } from '../fixtures/payeeFixtures';
 import {
+  bulkBatchDone,
+  bulkBatchFailed,
+  bulkBatchStart,
+  bulkCheckSummary,
   chunkAddresses,
   classifyBulkAddresses,
-  MAX_PAYEE_BATCH,
+  countBulkAddresses,
   parseBulkAddresses,
   type BulkAddress,
   type BulkMode,
@@ -188,7 +193,21 @@ export const PayeeManagement = () => {
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   const [bulkSending, setBulkSending] = useState(false);
 
-  const bulkTx = useTransaction({ contract: 'program' });
+  // Issue #482: progress between the first batch and the last has to reach a
+  // screen reader, so every batch speaks through the shared announcer — the
+  // inline progress line below is visual only and carries no live semantics.
+  const announce = useAnnouncer();
+
+  // The failure reason `explain()` produced for the batch currently in flight.
+  // `bulkTx.error` is state and lands a render later; the announcement goes
+  // out the moment the send gives up, so the reason is captured as it happens.
+  const bulkFailureReason = useRef<string | null>(null);
+  const bulkTx = useTransaction({
+    contract: 'program',
+    onError: (error) => {
+      bulkFailureReason.current = error.message;
+    },
+  });
 
   const eligibleAddresses = useMemo(
     () => (bulkResults ?? []).filter((entry) => entry.status === 'eligible').map((entry) => entry.address),
@@ -217,9 +236,17 @@ export const PayeeManagement = () => {
     setBulkSending(true);
     setBulkProgress({ done: 0, total: batches.length });
     const verifiedInThisRun: string[] = [];
+    const total = batches.length;
+    const requested = eligibleAddresses.length;
+    let succeeded = 0;
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       const call = bulkMode === 'verify' ? programme.allow_payees : programme.deny_payees;
+      // Start and result are two separate polite announcements: a batch can
+      // take longer than a screen reader would otherwise infer from the
+      // press, and a failure interrupts with what already landed (issue #482).
+      announce(bulkBatchStart(i + 1, total, batch.length, bulkMode));
+      bulkFailureReason.current = null;
       const result = await bulkTx.send(() => call({ payees: batch }));
       if (result === null) {
         // Failed or blocked: stop rather than skip ahead. The batches
@@ -227,12 +254,18 @@ export const PayeeManagement = () => {
         // remaining ones are simply not attempted yet, so retrying (once
         // whatever failed is fixed) picks up from here rather than
         // resending what already landed.
-        setBulkProgress({ done: i, total: batches.length });
+        setBulkProgress({ done: i, total });
         setBulkSending(false);
+        announce(
+          bulkBatchFailed(i + 1, total, succeeded, requested, bulkMode, bulkFailureReason.current),
+          'alert',
+        );
         return;
       }
+      succeeded += batch.length;
       if (bulkMode === 'verify') verifiedInThisRun.push(...batch);
-      setBulkProgress({ done: i + 1, total: batches.length });
+      announce(bulkBatchDone(i + 1, total, batch.length, bulkMode));
+      setBulkProgress({ done: i + 1, total });
     }
     for (const address of verifiedInThisRun) {
       remember({ address, label: 'Bulk verified' });
@@ -243,16 +276,7 @@ export const PayeeManagement = () => {
     setBulkSending(false);
   };
 
-  const bulkCounts = useMemo(() => {
-    const counts = { eligible: 0, invalid: 0, duplicate: 0, skipped: 0 };
-    for (const entry of bulkResults ?? []) {
-      if (entry.status === 'eligible') counts.eligible++;
-      else if (entry.status === 'invalid') counts.invalid++;
-      else if (entry.status === 'duplicate') counts.duplicate++;
-      else counts.skipped++; // already-verified or not-verified
-    }
-    return counts;
-  }, [bulkResults]);
+  const bulkCounts = useMemo(() => countBulkAddresses(bulkResults), [bulkResults]);
 
   return (
     <div className="payee-mgmt">
@@ -398,7 +422,11 @@ export const PayeeManagement = () => {
           </Button>
 
           {bulkResults && (
-            <div className="payee-mgmt__bulk-results" aria-live="polite">
+            // The pasted list is deliberately not a live region — reading sixty
+            // addresses back is noise. The summary line carries the polite
+            // announcement of what the check found; batch progress goes
+            // through the shared announcer (issue #482).
+            <div className="payee-mgmt__bulk-results">
               <ul className="payee-mgmt__bulk-list">
                 {bulkResults.map((entry) => {
                   const tone =
@@ -427,13 +455,8 @@ export const PayeeManagement = () => {
                   );
                 })}
               </ul>
-              <p className="payee-mgmt__bulk-summary">
-                {bulkCounts.eligible} to {bulkMode === 'verify' ? 'verify' : 'remove'}
-                {bulkCounts.invalid > 0 && `, ${bulkCounts.invalid} invalid`}
-                {bulkCounts.duplicate > 0 && `, ${bulkCounts.duplicate} duplicate`}
-                {bulkCounts.skipped > 0 && `, ${bulkCounts.skipped} already ${bulkMode === 'verify' ? 'verified' : 'unverified'}`}
-                {batches.length > 1 && ` — sent as ${batches.length} batches of up to ${MAX_PAYEE_BATCH}`}
-                .
+              <p className="payee-mgmt__bulk-summary" aria-live="polite">
+                {bulkCheckSummary(bulkCounts, bulkMode, batches.length)}
               </p>
               <Button
                 variant={bulkMode === 'remove' ? 'danger' : 'primary'}
@@ -445,18 +468,17 @@ export const PayeeManagement = () => {
                 {eligibleAddresses.length === 1 ? '' : 's'}
               </Button>
               {bulkProgress && (
-                <p className="payee-mgmt__bulk-progress" role="status">
+                <p className="payee-mgmt__bulk-progress">
                   Sending batch {Math.min(bulkProgress.done + 1, bulkProgress.total)} of {bulkProgress.total}
                   {bulkProgress.done > 0 && ` (${bulkProgress.done} done)`}…
                 </p>
               )}
             </div>
           )}
-          <TransactionOutcome
-            phase={bulkTx.phase}
-            error={bulkTx.error}
-            successTitle={bulkMode === 'verify' ? 'Batch verified' : 'Batch removed'}
-          />
+          {/* Announced by the shared announcer the moment a batch fails, so
+              the panel stays visual (`live={false}`) and the reason is read
+              once, alongside how much of the run landed. */}
+          {bulkTx.error && <ErrorPanel explained={bulkTx.error} live={false} />}
         </div>
       </Card>
 
